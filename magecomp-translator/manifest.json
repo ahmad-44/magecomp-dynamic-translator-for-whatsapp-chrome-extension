@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Magecomp Chat Auto Translator",
+  "version": "1.0",
+  "description": "Automatically translates messages to English with language detection",
+  "permissions": [],
+  "host_permissions": [
+    "https://inbox.magecomp.in/*",
+    "https://translate.googleapis.com/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://inbox.magecomp.in/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

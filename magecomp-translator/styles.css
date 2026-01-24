@@ -1,0 +1,28 @@
+.auto-translation {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: #e8f5e9;
+    border-left: 4px solid #4caf50;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #2e7d32;
+    line-height: 1.6;
+}
+
+.lang-badge {
+    display: inline-block;
+    background: #ff9800;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+.translation-loading {
+    margin-top: 6px;
+    color: #999;
+    font-size: 12px;
+    font-style: italic;
+}
