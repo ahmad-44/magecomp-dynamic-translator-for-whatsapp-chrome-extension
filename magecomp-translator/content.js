@@ -3,6 +3,7 @@ console.log('🌐 Magecomp Auto-Translator loaded');
 
 const translationCache = new Map();
 const translatingMessages = new Set();
+let isProcessing = false; // Prevent concurrent execution
 
 // Extract clean message text
 function getCleanMessageText(msgElement) {
@@ -14,6 +15,8 @@ function getCleanMessageText(msgElement) {
     text = text.replace(/✷/g, '').trim();
     text = text.replace(/Reply\\s+Forward\\s+Bookmark\\s+Delete/gi, '').trim();
     text = text.replace(/\\(Renze\\)/gi, '').replace(/\\(Bas\\)/gi, '').trim();
+    text = text.replace(/\\(Customer Support A\\.\\)/gi, '').trim();
+    text = text.replace(/\\(API\\)/gi, '').trim();
     
     return text;
 }
@@ -23,11 +26,17 @@ async function translateText(text) {
     if (translationCache.has(text)) {
         return translationCache.get(text);
     }
-
+    
     return new Promise((resolve) => {
         chrome.runtime.sendMessage(
             { action: 'translate', text },
             (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('❌ Runtime error:', chrome.runtime.lastError);
+                    resolve(null);
+                    return;
+                }
+                
                 if (response && response.success) {
                     // Only cache if translation is different from original
                     if (response.translation.toLowerCase() !== text.toLowerCase()) {
@@ -53,11 +62,21 @@ async function translateText(text) {
 
 // Process and translate messages
 async function processMessages() {
+    if (isProcessing) {
+        console.log('⏸️ Already processing, skipping...');
+        return;
+    }
+    
+    isProcessing = true;
+    
     const messages = document.querySelectorAll('.msg_pos.chat__message_received, .msg_pos.chat__message_send');
     
-    console.log(`🔍 Checking ${messages.length} messages`);
+    // Convert to array and REVERSE to process from bottom to top (newest first)
+    const messagesArray = Array.from(messages).reverse();
     
-    for (const msg of messages) {
+    console.log(`🔍 Checking ${messagesArray.length} messages (bottom to top)`);
+    
+    for (const msg of messagesArray) {
         if (msg.hasAttribute('data-translated')) {
             continue;
         }
@@ -103,9 +122,30 @@ async function processMessages() {
                 translationDiv.appendChild(langBadge);
                 translationDiv.appendChild(document.createTextNode(' ' + result.translation));
                 
-                msg.appendChild(translationDiv);
+                // Find the correct container based on message type
+                let targetContainer = null;
                 
-                msg.setAttribute('data-translated', 'yes');
+                // For sent messages (green bubbles)
+                if (msg.classList.contains('chat__message_send')) {
+                    targetContainer = msg.querySelector('.chat__message_send_body');
+                }
+                
+                // For received messages
+                if (msg.classList.contains('chat__message_received')) {
+                    const receivedBody = msg.querySelector('.chat__message_received_body');
+                    if (receivedBody) {
+                        targetContainer = receivedBody;
+                    }
+                }
+                
+                // Append translation inside the message bubble
+                if (targetContainer) {
+                    targetContainer.appendChild(translationDiv);
+                    msg.setAttribute('data-translated', 'yes');
+                } else {
+                    console.warn('Could not find container for translation');
+                    msg.setAttribute('data-translated', 'error');
+                }
             } else {
                 msg.setAttribute('data-translated', 'skip');
             }
@@ -125,6 +165,7 @@ async function processMessages() {
     }
     
     console.log('✅ Translation scan complete');
+    isProcessing = false;
 }
 
 // Initial translation
@@ -136,11 +177,16 @@ setTimeout(() => {
 // Re-check for new messages
 setInterval(() => {
     processMessages();
-}, 3000);
+}, 5000);
 
-// Watch for DOM changes
+// Watch for DOM changes - DEBOUNCED
+let mutationTimeout;
 const observer = new MutationObserver(() => {
-    setTimeout(processMessages, 500);
+    // Debounce: only process after 1 second of no changes
+    clearTimeout(mutationTimeout);
+    mutationTimeout = setTimeout(() => {
+        processMessages();
+    }, 1000);
 });
 
 setTimeout(() => {
@@ -148,7 +194,7 @@ setTimeout(() => {
     chatRegions.forEach(region => {
         observer.observe(region, {
             childList: true,
-            subtree: true
+            subtree: false
         });
     });
     console.log(`👀 Watching ${chatRegions.length} chat regions`);

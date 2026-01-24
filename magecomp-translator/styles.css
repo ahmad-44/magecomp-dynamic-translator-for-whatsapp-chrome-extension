@@ -1,12 +1,11 @@
 .auto-translation {
-    margin-top: 8px;
-    padding: 10px 12px;
-    background: #e8f5e9;
-    border-left: 4px solid #4caf50;
-    border-radius: 4px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(76, 175, 80, 0.3);
     font-size: 13px;
-    color: #2e7d32;
+    color: #1b5e20;
     line-height: 1.6;
+    font-style: italic;
 }
 
 .lang-badge {
