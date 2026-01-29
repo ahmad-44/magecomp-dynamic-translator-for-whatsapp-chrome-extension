@@ -8,16 +8,13 @@ let isProcessing = false; // Prevent concurrent execution
 // Extract clean message text
 function getCleanMessageText(msgElement) {
     const clone = msgElement.cloneNode(true);
-    
     clone.querySelectorAll('button, .auto-translation, .translation-loading').forEach(el => el.remove());
-    
     let text = clone.textContent.trim();
     text = text.replace(/✷/g, '').trim();
     text = text.replace(/Reply\\s+Forward\\s+Bookmark\\s+Delete/gi, '').trim();
     text = text.replace(/\\(Renze\\)/gi, '').replace(/\\(Bas\\)/gi, '').trim();
     text = text.replace(/\\(Customer Support A\\.\\)/gi, '').trim();
     text = text.replace(/\\(API\\)/gi, '').trim();
-    
     return text;
 }
 
@@ -68,12 +65,10 @@ async function processMessages() {
     }
     
     isProcessing = true;
-    
     const messages = document.querySelectorAll('.msg_pos.chat__message_received, .msg_pos.chat__message_send');
     
     // Convert to array and REVERSE to process from bottom to top (newest first)
     const messagesArray = Array.from(messages).reverse();
-    
     console.log(`🔍 Checking ${messagesArray.length} messages (bottom to top)`);
     
     for (const msg of messagesArray) {
@@ -127,14 +122,21 @@ async function processMessages() {
                 
                 // For sent messages (green bubbles)
                 if (msg.classList.contains('chat__message_send')) {
+                    // Try regular body first
                     targetContainer = msg.querySelector('.chat__message_send_body');
+                    // If not found, try the body_button_body (for messages with images)
+                    if (!targetContainer) {
+                        targetContainer = msg.querySelector('.chat__message_send_body_button_body');
+                    }
                 }
                 
                 // For received messages
                 if (msg.classList.contains('chat__message_received')) {
-                    const receivedBody = msg.querySelector('.chat__message_received_body');
-                    if (receivedBody) {
-                        targetContainer = receivedBody;
+                    // Try regular body first
+                    targetContainer = msg.querySelector('.chat__message_received_body');
+                    // If not found, try the body_button_body (for messages with images)
+                    if (!targetContainer) {
+                        targetContainer = msg.querySelector('.chat__message_received_body_button_body');
                     }
                 }
                 
@@ -143,7 +145,7 @@ async function processMessages() {
                     targetContainer.appendChild(translationDiv);
                     msg.setAttribute('data-translated', 'yes');
                 } else {
-                    console.warn('Could not find container for translation');
+                    console.warn('⚠️ Could not find container for translation:', msg);
                     msg.setAttribute('data-translated', 'error');
                 }
             } else {
@@ -151,7 +153,6 @@ async function processMessages() {
             }
             
             translatingMessages.delete(messageId);
-            
         } catch (err) {
             console.error('Translation error:', err);
             if (loadingDiv.parentNode) {
