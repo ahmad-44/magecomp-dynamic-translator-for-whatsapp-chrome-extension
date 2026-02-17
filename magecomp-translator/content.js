@@ -1,202 +1,181 @@
-// Magecomp Chat Auto-Translator
-console.log('🌐 Magecomp Auto-Translator loaded');
+// Magecomp Chat Auto-Translator — Final
+console.log('🌐 Chat Translator loaded');
 
-const translationCache = new Map();
-const translatingMessages = new Set();
-let isProcessing = false; // Prevent concurrent execution
+const cache = new Map(); // text key → {translation, detectedLang} | null
+let scanning = false;
 
-// Extract clean message text
-function getCleanMessageText(msgElement) {
-    const clone = msgElement.cloneNode(true);
-    clone.querySelectorAll('button, .auto-translation, .translation-loading').forEach(el => el.remove());
-    let text = clone.textContent.trim();
-    text = text.replace(/✷/g, '').trim();
-    text = text.replace(/Reply\\s+Forward\\s+Bookmark\\s+Delete/gi, '').trim();
-    text = text.replace(/\\(Renze\\)/gi, '').replace(/\\(Bas\\)/gi, '').trim();
-    text = text.replace(/\\(Customer Support A\\.\\)/gi, '').trim();
-    text = text.replace(/\\(API\\)/gi, '').trim();
-    return text;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function cleanText(msgEl) {
+  const clone = msgEl.cloneNode(true);
+  clone.querySelectorAll('.mct-translation').forEach(e => e.remove());
+  let t = clone.textContent.trim();
+  t = t.replace(/✷/g, '').trim();
+  t = t.replace(/Reply\\s+Forward\\s+Bookmark\\s+Delete/gi, '').trim();
+  t = t.replace(/\\(Renze\\)/gi, '').replace(/\\(Bas\\)/gi, '').trim();
+  t = t.replace(/\\(Customer Support A\\.\\)/gi, '').trim();
+  t = t.replace(/\\(API\\)/gi, '').trim();
+  return t.trim();
 }
 
-// Translate text using background script (no CORS issues)
-async function translateText(text) {
-    if (translationCache.has(text)) {
-        return translationCache.get(text);
-    }
-    
-    return new Promise((resolve) => {
-        chrome.runtime.sendMessage(
-            { action: 'translate', text },
-            (response) => {
-                if (chrome.runtime.lastError) {
-                    console.error('❌ Runtime error:', chrome.runtime.lastError);
-                    resolve(null);
-                    return;
-                }
-                
-                if (response && response.success) {
-                    // Only cache if translation is different from original
-                    if (response.translation.toLowerCase() !== text.toLowerCase()) {
-                        const result = {
-                            translation: response.translation,
-                            detectedLang: response.detectedLang
-                        };
-                        translationCache.set(text, result);
-                        console.log(`✅ Translated [${response.detectedLang} → en]: "${text.substring(0, 30)}..."`);
-                        resolve(result);
-                    } else {
-                        console.log(`⏭️ Skipped (already English): "${text.substring(0, 40)}..."`);
-                        resolve(null);
-                    }
-                } else {
-                    console.error('❌ Translation failed');
-                    resolve(null);
-                }
-            }
-        );
+function getBody(msgEl) {
+  return msgEl.querySelector(
+    '.chat__message_received_body, .chat__message_send_body, ' +
+    '.chat__message_received_body_button_body, .chat__message_send_body_button_body'
+  );
+}
+
+// ── Inject one message from cache (synchronous) ───────────────────────────────
+
+function inject(msgEl) {
+  const text = cleanText(msgEl);
+  if (text.length < 5) return;
+  const key = text.substring(0, 120);
+  if (!cache.has(key)) return;
+  const result = cache.get(key);
+  if (!result) return;
+  const body = getBody(msgEl);
+  if (!body) return;
+  if (body.querySelector('.mct-translation')) return; // already there
+
+  const div = document.createElement('div');
+  div.className = 'mct-translation';
+
+  const badge = document.createElement('span');
+  badge.className = 'mct-lang-badge';
+  badge.textContent = result.detectedLang.toUpperCase();
+
+  div.appendChild(badge);
+  div.appendChild(document.createTextNode(' ' + result.translation));
+  body.appendChild(div);
+}
+
+function injectAll(container) {
+  container.querySelectorAll(
+    '.msg_pos.chat__message_received, .msg_pos.chat__message_send'
+  ).forEach(inject);
+}
+
+// ── Translation API (via background.js) ───────────────────────────────────────
+
+function fetchTranslation(text) {
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ action: 'translate', text }, response => {
+      if (chrome.runtime.lastError) { resolve(null); return; }
+      if (response && response.success) {
+        const t = response.translation;
+        resolve(t.toLowerCase().trim() !== text.toLowerCase().trim()
+          ? { translation: t, detectedLang: response.detectedLang }
+          : null);
+      } else {
+        resolve(null);
+      }
     });
+  });
 }
 
-// Process and translate messages
-async function processMessages() {
-    if (isProcessing) {
-        console.log('⏸️ Already processing, skipping...');
-        return;
+// ── Async scan: fetch translations for anything not yet cached ────────────────
+
+async function scan() {
+  if (scanning) return;
+  scanning = true;
+
+  const msgs = document.querySelectorAll(
+    '.msg_pos.chat__message_received, .msg_pos.chat__message_send'
+  );
+  console.log('🔍 Scanning ' + msgs.length + ' messages');
+
+  for (const msg of Array.from(msgs).reverse()) {
+    const text = cleanText(msg);
+    if (text.length < 5) continue;
+    const key = text.substring(0, 120);
+    if (cache.has(key)) continue; // already known
+
+    try {
+      const result = await fetchTranslation(text);
+      cache.set(key, result);
+      if (result) console.log('✅ [' + result.detectedLang + '→en]: ' + text.substring(0, 40));
+    } catch(e) {
+      console.error('Translation error:', e);
     }
-    
-    isProcessing = true;
-    const messages = document.querySelectorAll('.msg_pos.chat__message_received, .msg_pos.chat__message_send');
-    
-    // Convert to array and REVERSE to process from bottom to top (newest first)
-    const messagesArray = Array.from(messages).reverse();
-    console.log(`🔍 Checking ${messagesArray.length} messages (bottom to top)`);
-    
-    for (const msg of messagesArray) {
-        if (msg.hasAttribute('data-translated')) {
-            continue;
-        }
-        
-        const text = getCleanMessageText(msg);
-        
-        if (text.length < 5) {
-            msg.setAttribute('data-translated', 'skip');
-            continue;
-        }
-        
-        const messageId = text.substring(0, 50);
-        if (translatingMessages.has(messageId)) {
-            continue;
-        }
-        
-        translatingMessages.add(messageId);
-        
-        // Add loading indicator
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'translation-loading';
-        loadingDiv.textContent = '⏳ Translating...';
-        msg.appendChild(loadingDiv);
-        
-        try {
-            const result = await translateText(text);
-            
-            if (loadingDiv.parentNode) {
-                loadingDiv.remove();
-            }
-            
-            if (result && result.translation) {
-                // Create translation div
-                const translationDiv = document.createElement('div');
-                translationDiv.className = 'auto-translation';
-                
-                // Add language badge
-                const langBadge = document.createElement('span');
-                langBadge.className = 'lang-badge';
-                langBadge.textContent = result.detectedLang.toUpperCase();
-                langBadge.title = `Detected language: ${result.detectedLang}`;
-                
-                translationDiv.appendChild(langBadge);
-                translationDiv.appendChild(document.createTextNode(' ' + result.translation));
-                
-                // Find the correct container based on message type
-                let targetContainer = null;
-                
-                // For sent messages (green bubbles)
-                if (msg.classList.contains('chat__message_send')) {
-                    // Try regular body first
-                    targetContainer = msg.querySelector('.chat__message_send_body');
-                    // If not found, try the body_button_body (for messages with images)
-                    if (!targetContainer) {
-                        targetContainer = msg.querySelector('.chat__message_send_body_button_body');
-                    }
-                }
-                
-                // For received messages
-                if (msg.classList.contains('chat__message_received')) {
-                    // Try regular body first
-                    targetContainer = msg.querySelector('.chat__message_received_body');
-                    // If not found, try the body_button_body (for messages with images)
-                    if (!targetContainer) {
-                        targetContainer = msg.querySelector('.chat__message_received_body_button_body');
-                    }
-                }
-                
-                // Append translation inside the message bubble
-                if (targetContainer) {
-                    targetContainer.appendChild(translationDiv);
-                    msg.setAttribute('data-translated', 'yes');
-                } else {
-                    console.warn('⚠️ Could not find container for translation:', msg);
-                    msg.setAttribute('data-translated', 'error');
-                }
-            } else {
-                msg.setAttribute('data-translated', 'skip');
-            }
-            
-            translatingMessages.delete(messageId);
-        } catch (err) {
-            console.error('Translation error:', err);
-            if (loadingDiv.parentNode) {
-                loadingDiv.remove();
-            }
-            msg.setAttribute('data-translated', 'error');
-            translatingMessages.delete(messageId);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 400));
-    }
-    
-    console.log('✅ Translation scan complete');
-    isProcessing = false;
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  // After all fetches: inject into whatever is currently live in the DOM
+  injectAll(document);
+  console.log('✅ Done. Cached: ' + cache.size);
+  scanning = false;
 }
 
-// Initial translation
+// ── Observer setup ────────────────────────────────────────────────────────────
+
+let ulObserver = null;
+
+function attachULObserver(ul) {
+  // Watches the UL for individual item wrappers being added by Virtuoso during scroll
+  if (ulObserver) ulObserver.disconnect();
+  ulObserver = new MutationObserver(mutations => {
+    mutations.forEach(m => {
+      m.addedNodes.forEach(node => {
+        if (node.nodeType !== 1) return;
+        const msgPos = node.querySelector && node.querySelector('.msg_pos');
+        if (!msgPos) return;
+        inject(msgPos); // instant re-inject from cache when item scrolls into view
+        // If not cached yet, queue a scan
+        const text = cleanText(msgPos);
+        if (text.length >= 5 && !cache.has(text.substring(0, 120))) {
+          clearTimeout(ulObserver._debounce);
+          ulObserver._debounce = setTimeout(scan, 500);
+        }
+      });
+    });
+  });
+  ulObserver.observe(ul, { childList: true, subtree: false });
+}
+
+function setupObservers() {
+  const viewport = document.querySelector('[data-viewport-type="element"]');
+  if (!viewport) {
+    console.warn('⚠️ Viewport not found, retrying...');
+    setTimeout(setupObservers, 1500);
+    return;
+  }
+
+  // Watches the VIEWPORT for the UL being replaced by React every ~3 seconds
+  const viewportObserver = new MutationObserver(mutations => {
+    mutations.forEach(m => {
+      m.addedNodes.forEach(node => {
+        if (node.nodeType !== 1) return;
+        // React just replaced the whole UL
+        const ul = node.tagName === 'UL'
+          ? node
+          : node.querySelector && node.querySelector('ul.chat-conversation-list');
+        if (!ul) return;
+        // Re-inject all cached translations into the new UL immediately
+        injectAll(ul);
+        // Re-attach the scroll observer to the new UL
+        attachULObserver(ul);
+        // If there are uncached messages in the new UL, scan them
+        const hasUncached = Array.from(
+          ul.querySelectorAll('.msg_pos.chat__message_received, .msg_pos.chat__message_send')
+        ).some(msg => !cache.has(cleanText(msg).substring(0, 120)));
+        if (hasUncached) setTimeout(scan, 100);
+      });
+    });
+  });
+
+  viewportObserver.observe(viewport, { childList: true, subtree: false });
+  console.log('👀 Observers ready');
+
+  // Also attach scroll observer to the UL that exists right now
+  const currentUL = document.querySelector('ul.chat-conversation-list');
+  if (currentUL) attachULObserver(currentUL);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
 setTimeout(() => {
-    console.log('🌐 Starting initial translation scan...');
-    processMessages();
+  setupObservers();
+  setTimeout(scan, 300);
+  setTimeout(scan, 2000); // retry in case React was slow to render
 }, 2000);
-
-// Re-check for new messages
-setInterval(() => {
-    processMessages();
-}, 5000);
-
-// Watch for DOM changes - DEBOUNCED
-let mutationTimeout;
-const observer = new MutationObserver(() => {
-    // Debounce: only process after 1 second of no changes
-    clearTimeout(mutationTimeout);
-    mutationTimeout = setTimeout(() => {
-        processMessages();
-    }, 1000);
-});
-
-setTimeout(() => {
-    const chatRegions = document.querySelectorAll('[aria-label="scrollable content"]');
-    chatRegions.forEach(region => {
-        observer.observe(region, {
-            childList: true,
-            subtree: false
-        });
-    });
-    console.log(`👀 Watching ${chatRegions.length} chat regions`);
-}, 1500);

@@ -1,27 +1,21 @@
-.auto-translation {
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid rgba(76, 175, 80, 0.3);
+.mct-translation {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(76, 175, 80, 0.4);
     font-size: 13px;
     color: #1b5e20;
     line-height: 1.6;
     font-style: italic;
 }
 
-.lang-badge {
+.mct-lang-badge {
     display: inline-block;
     background: #ff9800;
     color: white;
-    padding: 2px 8px;
+    padding: 2px 7px;
     border-radius: 3px;
     font-size: 11px;
     font-weight: bold;
-    margin-right: 8px;
-}
-
-.translation-loading {
-    margin-top: 6px;
-    color: #999;
-    font-size: 12px;
-    font-style: italic;
+    margin-right: 6px;
+    font-style: normal;
 }
