@@ -8,13 +8,13 @@ let scanning = false;
 
 function cleanText(msgEl) {
   const clone = msgEl.cloneNode(true);
-  clone.querySelectorAll('.mct-translation').forEach(e => e.remove());
+  clone.querySelectorAll('.mct-translation, .mct-loader').forEach(e => e.remove());
   let t = clone.textContent.trim();
   t = t.replace(/✷/g, '').trim();
-  t = t.replace(/Reply\\s+Forward\\s+Bookmark\\s+Delete/gi, '').trim();
-  t = t.replace(/\\(Renze\\)/gi, '').replace(/\\(Bas\\)/gi, '').trim();
-  t = t.replace(/\\(Customer Support A\\.\\)/gi, '').trim();
-  t = t.replace(/\\(API\\)/gi, '').trim();
+  t = t.replace(/Reply\s+Forward\s+Bookmark\s+Delete/gi, '').trim();
+  t = t.replace(/\(Renze\)/gi, '').replace(/\(Bas\)/gi, '').trim();
+  t = t.replace(/\(Customer Support A\.\)/gi, '').trim();
+  t = t.replace(/\(API\)/gi, '').trim();
   return t.trim();
 }
 
@@ -25,7 +25,26 @@ function getBody(msgEl) {
   );
 }
 
-// ── Inject one message from cache (synchronous) ───────────────────────────────
+// ── Loader ────────────────────────────────────────────────────────────────────
+
+function showLoader(msgEl) {
+  const body = getBody(msgEl);
+  if (!body) return;
+  if (body.querySelector('.mct-translation, .mct-loader')) return; // already has something
+  const loader = document.createElement('div');
+  loader.className = 'mct-loader';
+  loader.innerHTML = '<span class="mct-loader-dot"></span><span class="mct-loader-dot"></span><span class="mct-loader-dot"></span>';
+  body.appendChild(loader);
+}
+
+function removeLoader(msgEl) {
+  const body = getBody(msgEl);
+  if (!body) return;
+  const loader = body.querySelector('.mct-loader');
+  if (loader) loader.remove();
+}
+
+// ── Inject translation from cache (synchronous) ───────────────────────────────
 
 function inject(msgEl) {
   const text = cleanText(msgEl);
@@ -33,10 +52,14 @@ function inject(msgEl) {
   const key = text.substring(0, 120);
   if (!cache.has(key)) return;
   const result = cache.get(key);
-  if (!result) return;
+
+  // Always remove loader first
+  removeLoader(msgEl);
+  if (!result) return; // null = already English, nothing to show
+
   const body = getBody(msgEl);
   if (!body) return;
-  if (body.querySelector('.mct-translation')) return; // already there
+  if (body.querySelector('.mct-translation')) return; // already injected
 
   const div = document.createElement('div');
   div.className = 'mct-translation';
@@ -74,7 +97,7 @@ function fetchTranslation(text) {
   });
 }
 
-// ── Async scan: fetch translations for anything not yet cached ────────────────
+// ── Async scan ────────────────────────────────────────────────────────────────
 
 async function scan() {
   if (scanning) return;
@@ -89,7 +112,14 @@ async function scan() {
     const text = cleanText(msg);
     if (text.length < 5) continue;
     const key = text.substring(0, 120);
-    if (cache.has(key)) continue; // already known
+
+    if (cache.has(key)) {
+      inject(msg); // already cached — inject (or remove loader if English)
+      continue;
+    }
+
+    // Show loader while we fetch
+    showLoader(msg);
 
     try {
       const result = await fetchTranslation(text);
@@ -98,21 +128,22 @@ async function scan() {
     } catch(e) {
       console.error('Translation error:', e);
     }
+
+    // Replace loader with translation (or remove loader if English)
+    inject(msg);
+
     await new Promise(r => setTimeout(r, 200));
   }
 
-  // After all fetches: inject into whatever is currently live in the DOM
-  injectAll(document);
   console.log('✅ Done. Cached: ' + cache.size);
   scanning = false;
 }
 
-// ── Observer setup ────────────────────────────────────────────────────────────
+// ── Observers ─────────────────────────────────────────────────────────────────
 
 let ulObserver = null;
 
 function attachULObserver(ul) {
-  // Watches the UL for individual item wrappers being added by Virtuoso during scroll
   if (ulObserver) ulObserver.disconnect();
   ulObserver = new MutationObserver(mutations => {
     mutations.forEach(m => {
@@ -120,8 +151,7 @@ function attachULObserver(ul) {
         if (node.nodeType !== 1) return;
         const msgPos = node.querySelector && node.querySelector('.msg_pos');
         if (!msgPos) return;
-        inject(msgPos); // instant re-inject from cache when item scrolls into view
-        // If not cached yet, queue a scan
+        inject(msgPos); // instant re-inject from cache on scroll
         const text = cleanText(msgPos);
         if (text.length >= 5 && !cache.has(text.substring(0, 120))) {
           clearTimeout(ulObserver._debounce);
@@ -136,26 +166,22 @@ function attachULObserver(ul) {
 function setupObservers() {
   const viewport = document.querySelector('[data-viewport-type="element"]');
   if (!viewport) {
-    console.warn('⚠️ Viewport not found, retrying...');
     setTimeout(setupObservers, 1500);
     return;
   }
 
-  // Watches the VIEWPORT for the UL being replaced by React every ~3 seconds
+  // Watches viewport for React replacing the entire UL every ~3 seconds
   const viewportObserver = new MutationObserver(mutations => {
     mutations.forEach(m => {
       m.addedNodes.forEach(node => {
         if (node.nodeType !== 1) return;
-        // React just replaced the whole UL
         const ul = node.tagName === 'UL'
           ? node
           : node.querySelector && node.querySelector('ul.chat-conversation-list');
         if (!ul) return;
-        // Re-inject all cached translations into the new UL immediately
-        injectAll(ul);
-        // Re-attach the scroll observer to the new UL
-        attachULObserver(ul);
-        // If there are uncached messages in the new UL, scan them
+        injectAll(ul);       // re-inject all cached translations immediately
+        attachULObserver(ul); // re-attach scroll observer to fresh UL
+        // Scan for any new uncached messages
         const hasUncached = Array.from(
           ul.querySelectorAll('.msg_pos.chat__message_received, .msg_pos.chat__message_send')
         ).some(msg => !cache.has(cleanText(msg).substring(0, 120)));
@@ -167,7 +193,6 @@ function setupObservers() {
   viewportObserver.observe(viewport, { childList: true, subtree: false });
   console.log('👀 Observers ready');
 
-  // Also attach scroll observer to the UL that exists right now
   const currentUL = document.querySelector('ul.chat-conversation-list');
   if (currentUL) attachULObserver(currentUL);
 }
@@ -177,5 +202,5 @@ function setupObservers() {
 setTimeout(() => {
   setupObservers();
   setTimeout(scan, 300);
-  setTimeout(scan, 2000); // retry in case React was slow to render
+  setTimeout(scan, 2000);
 }, 2000);

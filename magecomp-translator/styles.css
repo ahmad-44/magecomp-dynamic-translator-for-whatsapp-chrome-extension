@@ -1,3 +1,4 @@
+/* Translation result */
 .mct-translation {
     margin-top: 8px;
     padding-top: 8px;
@@ -18,4 +19,31 @@
     font-weight: bold;
     margin-right: 6px;
     font-style: normal;
+}
+
+/* Loading indicator */
+.mct-loader {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.mct-loader-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #aaa;
+    animation: mct-bounce 1.2s infinite ease-in-out;
+}
+
+.mct-loader-dot:nth-child(1) { animation-delay: 0s; }
+.mct-loader-dot:nth-child(2) { animation-delay: 0.2s; }
+.mct-loader-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes mct-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40%           { transform: scale(1.0); opacity: 1;   }
 }
